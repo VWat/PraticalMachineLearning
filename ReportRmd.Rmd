@@ -1,0 +1,182 @@
+---
+title: "Final Assignement Report"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1 Import libraries
+First, I import the libraries I need.
+
+```{r}
+#install.packages('caret', repos = "http://cran.us.r-project.org")
+library(caret)
+
+#install.packages('corrplot', repos = "http://cran.us.r-project.org")
+library(corrplot)
+
+#install.packages('rpart', repos = "http://cran.us.r-project.org")
+library(rpart)
+
+#install.packages('rattle', repos = "http://cran.us.r-project.org")
+library(rattle)
+
+#install.packages('ISLR', repos = "http://cran.us.r-project.org")
+library(ISLR)
+
+#install.packages('gbm', repos = "http://cran.us.r-project.org")
+library(gbm)
+```
+  
+  
+## 2 Import Data
+
+Then, I import data I need to build my model (train set) and to make predictions (test set).
+
+```{r a}
+TrainSet = read.csv('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv')
+TestSet = read.csv('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv')
+```
+  
+  
+## 3 Expore Data
+
+I want to know how many variables there are in the imported data.
+
+```{r b}
+ncol(TrainSet) #To know the number of varibales
+```
+  
+  
+That is a lot. However, I can clean the variables (removing blank, NA, and label) that are useless to build a model.
+```{r c}
+TrainSet[TrainSet==""] = NA #put NA in empty cells
+TrainSet = TrainSet[ , colSums(is.na(TrainSet)) == 0]  #Remove all columns with NA (useless variables)
+TrainSet = TrainSet[, -c(1:7)] #Remove seven first variables that are labels
+```
+  
+  
+In the end, there are far fewer variables.
+```{r d}
+ncol(TrainSet)
+```
+  
+  
+We can eyeball these variables.
+```{r e}
+summary(TrainSet) #To get information about train set
+```
+  
+  
+## 4 Prepare data for building the model
+
+Now I use simple cross validation on train set: 60% of data goes in the train set and 40% of data goes in the test set.
+
+```{r f}
+set.seed(1789) #For reproductibility purpose
+
+inTrain = createDataPartition(TrainSet$classe, p = 0.60, list = FALSE)
+
+TrainingSet = TrainSet[inTrain, ]
+ProbingSet = TrainSet[-inTrain, ]
+```
+  
+  
+I want to be sure that all variables carry information for the model. Thus, I check if there is not too much correlation between variables.
+
+```{r g}
+M = abs(cor(TrainingSet[, -53]))
+diag(M) = 0
+corrplot(M, order = "FPC", method = "color", type = "upper", tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+
+nrow(which(M>0.8, arr.ind = T))/length(M) #Percentage of correlation
+```
+
+A very small percentage of variables are correlated, hence we can proceed with all variables in model building.
+  
+  
+## 5 Finding the best model
+
+I will try three models to find the one with the best accuracy.
+  
+  
+#### Decision tree
+
+```{r h}
+DecisionTree = rpart(classe ~ ., data=TrainingSet, method="class")
+fancyRpartPlot(DecisionTree) #Print the tree
+
+PredictionDecisionTree = predict(DecisionTree, ProbingSet, type = "class")
+DecisionTreeM = confusionMatrix(table(PredictionDecisionTree, ProbingSet$classe))
+DecisionTreeM
+```
+
+Accuracy is low, this model is not very good.
+  
+  
+#### Random forest
+
+```{r i}
+RandomForest = train(classe ~ ., data=TrainingSet, method="rf", ntree = 5)
+
+PredictionRandomForest = predict(RandomForest, ProbingSet)
+RandomForestM = confusionMatrix(table(PredictionRandomForest, ProbingSet$classe))
+RandomForestM
+```
+
+Very good accuracy, this model takes a while to compute, that is why there are only five trees.
+  
+  
+#### Boosting
+
+```{r j}
+control = trainControl(method = "repeatedcv", number = 3, repeats = 1)
+Boosting = train(classe ~ ., data=TrainingSet, method = "gbm", trControl = control, verbose = FALSE)
+
+PredictionBoosting = predict(Boosting, ProbingSet)
+BoostingM = confusionMatrix(table(PredictionBoosting, ProbingSet$classe))
+BoostingM
+```
+
+Very good accuracy, this model takes a long time to compute.
+  
+  
+#### Conclusion
+
+Based on accuracy (and computation time), the best model is the random forest.
+  
+  
+## 6 Prediction to answer assignement
+
+```{r k}
+PredictionFinal = predict(RandomForest, TestSet)
+PredictionFinal
+```
+  
+  
+## 7 Final note about out of sample error
+
+We can estimate the out of sample error with the accuracy on the test set computed on the initial cross validation.
+```{r l}
+1-RandomForestM$overall[1]
+# 1 - accuracy = out of sample error
+```
+  
+  
+But, to have a more precise out of sample error we can compute it with a more robust cross validation technique (but long to compute). I perform a 10-fold cross validation repeated three times and display the out of sample error.
+
+```{r m}
+train.control = trainControl(method = "repeatedcv", number = 10, repeats = 3)
+OffSampleError = train(classe ~ ., data=TrainingSet, method="rf", ntree = 5, trControl = train.control)
+1-mean(OffSampleError$results$Accuracy)
+```
+  
+  
+## 8 Final note about my choices
+
+- I tried to avoid overfitting 
+- I tried to limit computation time (this report needs five minutes to be edited)
+- I choose non linear models because there is no reason to believe that the relationship is linear
+- I tested several models to determine the best one
